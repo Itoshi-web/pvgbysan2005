@@ -30,9 +30,27 @@ export class GameService {
     return room;
   }
 
+  togglePlayerReady(roomId, username) {
+    const room = this.rooms.get(roomId);
+    if (!room) throw new Error('Room not found');
+
+    const player = room.players.find(p => p.username === username);
+    if (!player) throw new Error('Player not found');
+
+    // Don't toggle ready state for the host (first player)
+    if (player === room.players[0]) return room;
+
+    player.ready = !player.ready;
+    return room;
+  }
+
   startGame(roomId) {
     const room = this.rooms.get(roomId);
     if (!room) throw new Error('Room not found');
+    
+    // Check if all non-host players are ready
+    const allPlayersReady = room.players.slice(1).every(player => player.ready);
+    if (!allPlayersReady) throw new Error('Not all players are ready');
     
     room.started = true;
     room.gameState = new GameState(room.players);
