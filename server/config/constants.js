@@ -14,7 +14,7 @@ export const EVENTS = {
 };
 
 export const ORIGINS = [
-  'https://heartfelt-pasca-0a1d05.netlify.app',
+  'https://guileless-elf-34f392.netlify.app',
   'http://localhost:5173'
 ];
 
