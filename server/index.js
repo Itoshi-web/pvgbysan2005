@@ -15,7 +15,6 @@ app.use(cors({
   credentials: true
 }));
 
-// Root route
 app.get('/', (req, res) => {
   res.status(200).json({ 
     status: 'online',
@@ -24,7 +23,6 @@ app.get('/', (req, res) => {
   });
 });
 
-// Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'healthy' });
 });
@@ -83,6 +81,47 @@ io.on(EVENTS.CONNECT, (socket) => {
     }
   });
 
+  socket.on('toggleReady', ({ roomId, username }) => {
+    try {
+      const updatedRoom = gameService.togglePlayerReady(roomId, username);
+      io.to(roomId).emit('roomUpdated', { room: updatedRoom });
+    } catch (error) {
+      socket.emit(EVENTS.ERROR, { message: error.message });
+    }
+  });
+
+  socket.on('startGame', ({ roomId }) => {
+    try {
+      const room = gameService.startGame(roomId);
+      io.to(roomId).emit(EVENTS.GAME_STARTED, { gameState: room.gameState });
+    } catch (error) {
+      socket.emit(EVENTS.ERROR, { message: error.message });
+    }
+  });
+
+  socket.on('gameAction', ({ roomId, action, data }) => {
+    try {
+      const room = gameService.rooms.get(roomId);
+      if (!room) throw new Error('Room not found');
+
+      // Handle different game actions (roll, shoot, etc.)
+      switch (action) {
+        case 'roll':
+          // Update game state based on dice roll
+          break;
+        case 'shoot':
+          // Handle shooting action
+          break;
+        default:
+          throw new Error('Invalid game action');
+      }
+
+      io.to(roomId).emit(EVENTS.GAME_STATE_UPDATED, { gameState: room.gameState });
+    } catch (error) {
+      socket.emit(EVENTS.ERROR, { message: error.message });
+    }
+  });
+
   socket.on('leaveRoom', () => {
     try {
       for (const [roomId, room] of gameService.rooms.entries()) {
@@ -106,9 +145,31 @@ io.on(EVENTS.CONNECT, (socket) => {
     }
   });
 
+  socket.on('sendEmote', ({ roomId, emote }) => {
+    try {
+      const room = gameService.rooms.get(roomId);
+      if (!room) throw new Error('Room not found');
+
+      const player = room.players.find(p => p.id === socket.id);
+      if (!player) throw new Error('Player not found');
+
+      io.to(roomId).emit('emote', { username: player.username, emote });
+    } catch (error) {
+      socket.emit(EVENTS.ERROR, { message: error.message });
+    }
+  });
+
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
     // Handle disconnection logic here
+    for (const [roomId, room] of gameService.rooms.entries()) {
+      const playerIndex = room.players.findIndex(p => p.id === socket.id);
+      if (playerIndex !== -1) {
+        const username = room.players[playerIndex].username;
+        socket.to(roomId).emit(EVENTS.PLAYER_LEFT, { room, username });
+        break;
+      }
+    }
   });
 });
 
