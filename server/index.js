@@ -83,8 +83,8 @@ io.on(EVENTS.CONNECT, (socket) => {
 
   socket.on('toggleReady', ({ roomId, username }) => {
     try {
-      const updatedRoom = gameService.togglePlayerReady(roomId, username);
-      io.to(roomId).emit('roomUpdated', { room: updatedRoom });
+      const room = gameService.togglePlayerReady(roomId, username);
+      io.to(roomId).emit(EVENTS.ROOM_UPDATED, { room });
     } catch (error) {
       socket.emit(EVENTS.ERROR, { message: error.message });
     }
@@ -104,19 +104,49 @@ io.on(EVENTS.CONNECT, (socket) => {
       const room = gameService.rooms.get(roomId);
       if (!room) throw new Error('Room not found');
 
-      // Handle different game actions (roll, shoot, etc.)
+      let updatedRoom;
       switch (action) {
         case 'roll':
-          // Update game state based on dice roll
+          updatedRoom = gameService.handleRoll(roomId, data.value);
           break;
         case 'shoot':
-          // Handle shooting action
+          updatedRoom = gameService.handleShoot(roomId, data.targetPlayer, data.targetCell);
           break;
         default:
           throw new Error('Invalid game action');
       }
 
-      io.to(roomId).emit(EVENTS.GAME_STATE_UPDATED, { gameState: room.gameState });
+      // Check for game end
+      const remainingPlayers = updatedRoom.gameState.players.filter(p => !p.eliminated);
+      if (remainingPlayers.length === 1) {
+        const winner = remainingPlayers[0];
+        const history = {
+          winner: winner.username,
+          eliminations: updatedRoom.gameState.gameLog
+            .filter(log => log.type === 'eliminate')
+            .map(log => ({
+              eliminator: log.shooter,
+              eliminated: log.player
+            })),
+          playerStats: Object.fromEntries(
+            updatedRoom.gameState.players.map(player => [
+              player.username,
+              {
+                shotsFired: player.cells.reduce((acc, cell) => acc + (5 - (cell.bullets || 0)), 0),
+                eliminations: updatedRoom.gameState.gameLog.filter(log => 
+                  log.type === 'eliminate' && log.shooter === player.username
+                ).length,
+                timesTargeted: updatedRoom.gameState.gameLog.filter(log =>
+                  log.type === 'shoot' && log.target === player.username
+                ).length
+              }
+            ])
+          )
+        };
+        io.to(roomId).emit(EVENTS.GAME_ENDED, { history });
+      }
+
+      io.to(roomId).emit(EVENTS.GAME_STATE_UPDATED, { gameState: updatedRoom.gameState });
     } catch (error) {
       socket.emit(EVENTS.ERROR, { message: error.message });
     }
@@ -161,7 +191,6 @@ io.on(EVENTS.CONNECT, (socket) => {
 
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
-    // Handle disconnection logic here
     for (const [roomId, room] of gameService.rooms.entries()) {
       const playerIndex = room.players.findIndex(p => p.id === socket.id);
       if (playerIndex !== -1) {
