@@ -14,7 +14,7 @@ export const EVENTS = {
 };
 
 export const ORIGINS = [
-  'https://lambent-nasturtium-dbb11c.netlify.app',
+  'https://shimmering-centaur-6d9e56.netlify.app/',
   'http://localhost:5173'
 ];
 
