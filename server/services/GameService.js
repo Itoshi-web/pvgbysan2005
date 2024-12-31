@@ -1,4 +1,5 @@
 import { GameState } from '../models/GameState.js';
+import { Room } from '../models/Room.js';
 
 export class GameService {
   constructor() {
@@ -37,6 +38,4 @@ export class GameService {
     room.gameState = new GameState(room.players);
     return room;
   }
-
-  // Add other game-related methods here
 }
