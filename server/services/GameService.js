@@ -84,6 +84,8 @@ export class GameService {
         player: currentPlayer.username,
         cell: value
       });
+      room.gameState.lastRoll = value;
+      room.gameState.nextTurn();
     } else {
       // Upgrade cell if not at max level
       if (cell.stage < 6) {
@@ -96,9 +98,13 @@ export class GameService {
             cell: value
           });
         }
+        room.gameState.lastRoll = value;
+        room.gameState.nextTurn();
       } else {
-        // Reload bullets if at max level
+        // At max level (6), reload bullets and allow shooting
         cell.bullets = Math.min((cell.bullets || 0) + 3, 5);
+        room.gameState.lastRoll = value;
+        // Don't call nextTurn() here - player can now shoot
         room.gameState.gameLog.push({
           type: 'reload',
           player: currentPlayer.username,
@@ -106,9 +112,6 @@ export class GameService {
         });
       }
     }
-
-    room.gameState.lastRoll = value;
-    room.gameState.nextTurn();
     return room;
   }
 
@@ -148,7 +151,8 @@ export class GameService {
       target.eliminated = true;
       room.gameState.gameLog.push({
         type: 'eliminate',
-        player: target.username
+        player: target.username,
+        shooter: currentPlayer.username
       });
     }
 
