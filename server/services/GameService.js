@@ -86,5 +86,19 @@ export class GameService {
     return this.shootHandler.handle(room, targetPlayer, targetCell);
   }
 
+  togglePlayerReady(roomId, username) {
+    const room = this.rooms.get(roomId);
+    if (!room) throw new Error('Room not found');
+
+    const player = room.players.find(p => p.username === username);
+    if (!player) throw new Error('Player not found');
+
+    // Host (first player) can't toggle ready state
+    if (player === room.players[0]) return room;
+
+    player.ready = !player.ready;
+    return room;
+  }
+
   // Other methods remain the same...
 }
