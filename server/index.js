@@ -55,6 +55,40 @@ io.on(EVENTS.CONNECT, (socket) => {
     }
   });
 
+  socket.on('quickMatch', ({ username }) => {
+    try {
+      // Try to find an available room immediately
+      const matchedRoomId = gameService.findQuickMatch(username);
+      
+      if (matchedRoomId) {
+        // Join the found room
+        const player = { id: socket.id, username, ready: false };
+        const room = gameService.joinRoom(matchedRoomId, player);
+        socket.join(matchedRoomId);
+        io.to(matchedRoomId).emit(EVENTS.PLAYER_JOINED, { room });
+      } else {
+        // Create a new room for this player
+        const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+        const room = gameService.createRoom(roomId, 4); // Default to 4 players, no password
+        const player = { id: socket.id, username, ready: false };
+        gameService.joinRoom(roomId, player);
+        socket.join(roomId);
+        socket.emit(EVENTS.ROOM_CREATED, { room });
+
+        // Start a 20-second timer to find matches
+        setTimeout(() => {
+          const currentRoom = gameService.rooms.get(roomId);
+          if (currentRoom && currentRoom.players.length === 1) {
+            // If still alone after 20 seconds, notify the player
+            socket.emit('quickMatchTimeout');
+          }
+        }, 20000);
+      }
+    } catch (error) {
+      socket.emit(EVENTS.ERROR, { message: error.message });
+    }
+  });
+
   socket.on('createRoom', ({ maxPlayers, password, username }) => {
     try {
       const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
