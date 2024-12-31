@@ -6,7 +6,7 @@ export class GameService {
   constructor() {
     this.rooms = new Map();
     this.playerSessions = new Map();
-    this.quickMatchQueue = new Map(); // Track players in quick match
+    this.quickMatchQueue = new Map();
     this.powerUpManager = new PowerUpManager();
   }
 
@@ -17,7 +17,6 @@ export class GameService {
   }
 
   findQuickMatch(username) {
-    // Find an available room (no password, not full)
     for (const [roomId, room] of this.rooms.entries()) {
       if (!room.password && !room.isFull() && !room.started) {
         return roomId;
@@ -40,7 +39,6 @@ export class GameService {
       roomId: roomId
     });
     
-    // Initialize power-up state for the player
     this.powerUpManager.initializePlayer(player.id);
     
     return room;
@@ -77,8 +75,29 @@ export class GameService {
 
     const currentPlayer = room.gameState.players[room.gameState.currentPlayer];
     
+    // Check if it's player's first move and they didn't roll 1
+    if (currentPlayer.firstMove && value !== 1) {
+      room.gameState.gameLog.push({
+        type: 'firstMove',
+        player: currentPlayer.username,
+        message: `${currentPlayer.username} needs to roll 1 to start`
+      });
+      room.gameState.nextTurn();
+      return { room };
+    }
+
+    // If player rolled 1 on their first move, mark firstMove as false
+    if (currentPlayer.firstMove && value === 1) {
+      currentPlayer.firstMove = false;
+      room.gameState.gameLog.push({
+        type: 'firstMove',
+        player: currentPlayer.username,
+        message: `${currentPlayer.username} rolled 1 and can now start playing!`
+      });
+    }
+
     // Check for power-up trigger (6) in 5-player games
-    if (room.players.length === 5 && value === 6) {
+    if (room.players.length === 5 && value === 6 && !currentPlayer.firstMove) {
       const powerUp = this.powerUpManager.grantPowerUp(currentPlayer.id);
       if (powerUp) {
         room.gameState.gameLog.push({
@@ -102,8 +121,42 @@ export class GameService {
       return { room };
     }
 
-    // Rest of the existing roll logic...
-    // [Previous roll logic remains unchanged]
+    // Handle normal roll for non-first moves
+    if (!currentPlayer.firstMove) {
+      const targetCell = currentPlayer.cells[value - 1];
+      
+      if (!targetCell.isActive) {
+        targetCell.isActive = true;
+        targetCell.stage = 1;
+        room.gameState.gameLog.push({
+          type: 'activate',
+          player: currentPlayer.username,
+          cell: value
+        });
+      } else if (targetCell.stage < 6) {
+        targetCell.stage++;
+        if (targetCell.stage === 6) {
+          targetCell.bullets = 5;
+          room.gameState.gameLog.push({
+            type: 'maxLevel',
+            player: currentPlayer.username,
+            cell: value
+          });
+        }
+      } else if (targetCell.stage === 6 && targetCell.bullets < 5) {
+        targetCell.bullets = Math.min(5, targetCell.bullets + 1);
+        room.gameState.gameLog.push({
+          type: 'reload',
+          player: currentPlayer.username,
+          cell: value
+        });
+      }
+    }
+
+    room.gameState.lastRoll = value;
+    if (!currentPlayer.firstMove) {
+      room.gameState.nextTurn();
+    }
 
     return { room };
   }
@@ -177,13 +230,11 @@ export class GameService {
 
     this.powerUpManager.updateCooldowns();
     
-    // Update game state based on active effects
     room.gameState.players.forEach(player => {
       const state = this.powerUpManager.getPlayerState(player.id);
       if (state?.activeEffects.length > 0) {
-        // Apply active effects (freeze, shield, etc.)
         state.activeEffects.forEach(effect => {
-          // Effect-specific logic
+          // Effect-specific logic handled by PowerUpManager
         });
       }
     });
