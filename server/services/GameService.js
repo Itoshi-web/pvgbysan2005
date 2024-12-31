@@ -20,7 +20,6 @@ export class GameService {
   }
 
   findQuickMatch(username) {
-    // Look for available rooms without password
     for (const [roomId, room] of this.rooms.entries()) {
       if (!room.password && !room.isFull() && !room.started) {
         return roomId;
@@ -38,7 +37,6 @@ export class GameService {
     if (room.isFull()) throw new Error('Room is full');
     if (room.started) throw new Error('Game already started');
     
-    // Check if username is already taken in this room
     if (room.players.some(p => p.username === player.username)) {
       throw new Error('Username already taken in this room');
     }
@@ -61,7 +59,6 @@ export class GameService {
     const player = room.players.find(p => p.username === username);
     if (!player) throw new Error('Player not found');
 
-    // Host can't toggle ready state
     if (player === room.players[0]) return room;
 
     player.ready = !player.ready;
@@ -72,19 +69,15 @@ export class GameService {
     const room = this.rooms.get(roomId);
     if (!room) throw new Error('Room not found');
     
-    // Check if all non-host players are ready
     const allPlayersReady = room.players.slice(1).every(player => player.ready);
     if (!allPlayersReady) throw new Error('Not all players are ready');
     
-    // Need at least 2 players to start
     if (room.players.length < 2) {
       throw new Error('Need at least 2 players to start');
     }
     
     room.started = true;
     room.gameState = new GameState(room.players);
-    
-    // Initialize game state based on number of players
     const numPlayers = room.players.length;
     room.gameState.maxDiceValue = numPlayers === 5 ? 6 : numPlayers;
     
@@ -97,12 +90,10 @@ export class GameService {
 
     const currentPlayer = room.gameState.players[room.gameState.currentPlayer];
     
-    // Validate dice value based on number of players
     if (value > room.gameState.maxDiceValue) {
       throw new Error('Invalid dice value');
     }
     
-    // Check for first move - must roll a 1
     if (currentPlayer.firstMove && value !== 1) {
       room.gameState.gameLog.push({
         type: 'firstMove',
@@ -113,7 +104,6 @@ export class GameService {
       return { room };
     }
 
-    // Check for power-up trigger (6) in 5-player games
     if (room.players.length === 5 && value === 6) {
       const powerUp = this.powerUpManager.grantPowerUp(currentPlayer.id);
       if (powerUp) {
@@ -122,11 +112,9 @@ export class GameService {
           player: currentPlayer.username,
           powerUpType: powerUp.type
         });
-        return { room, powerUp };
       }
     }
 
-    // Check if player is affected by noRoll power-up
     const powerUpState = this.powerUpManager.getPlayerState(currentPlayer.id);
     if (powerUpState?.activeEffects.some(effect => effect.type === 'noRoll')) {
       room.gameState.gameLog.push({
@@ -173,6 +161,11 @@ export class GameService {
     }
 
     room.gameState.lastRoll = value;
+
+    if (targetCell.stage !== 6 || targetCell.bullets === 0) {
+      room.gameState.nextTurn();
+    }
+
     return { room };
   }
 
@@ -188,39 +181,32 @@ export class GameService {
     if (currentPlayer.eliminated) throw new Error('Eliminated players cannot shoot');
     if (currentPlayer.firstMove) throw new Error('Cannot shoot on first move');
 
-    // Get the cell that's doing the shooting based on last roll
     const lastRoll = room.gameState.lastRoll;
     if (!lastRoll) throw new Error('Must roll before shooting');
 
     const shooterCell = currentPlayer.cells[lastRoll - 1];
     if (!shooterCell) throw new Error('Invalid shooter cell');
     
-    // Validate shooter cell conditions
     if (!shooterCell.isActive) throw new Error('Shooter cell is not active');
     if (shooterCell.stage !== 6) throw new Error('Cell must be at stage 6 to shoot');
     if (!shooterCell.bullets || shooterCell.bullets <= 0) throw new Error('No bullets available');
 
-    // Get and validate target cell
     const targetCellObj = target.cells[targetCell];
     if (!targetCellObj) throw new Error('Target cell not found');
     if (!targetCellObj.isActive) throw new Error('Cannot shoot an inactive cell');
 
-    // Check for shield power-up
     const targetPowerUpState = this.powerUpManager.getPlayerState(target.id);
     const isShielded = targetPowerUpState?.activeEffects.some(
       effect => effect.type === 'shield' && effect.targetCell === targetCell
     );
     if (isShielded) throw new Error('Target cell is shielded');
 
-    // Perform the shot
     shooterCell.bullets--;
 
-    // Destroy target cell
     targetCellObj.isActive = false;
     targetCellObj.stage = 0;
     targetCellObj.bullets = 0;
 
-    // Log the shot
     room.gameState.gameLog.push({
       type: 'shoot',
       shooter: currentPlayer.username,
@@ -228,7 +214,6 @@ export class GameService {
       cell: targetCell + 1
     });
 
-    // Check if target player is eliminated
     const isEliminated = target.cells.every(cell => !cell.isActive);
     if (isEliminated) {
       target.eliminated = true;
@@ -239,7 +224,6 @@ export class GameService {
       });
     }
 
-    // Move to next turn
     room.gameState.nextTurn();
     return room;
   }
@@ -272,23 +256,18 @@ export class GameService {
       const state = this.powerUpManager.getPlayerState(player.id);
       if (state?.activeEffects.length > 0) {
         state.activeEffects.forEach(effect => {
-          // Apply active effects (freeze, shield, etc.)
           switch (effect.type) {
             case 'freeze':
-              // Cell remains frozen for the duration
               break;
             case 'shield':
-              // Cell remains shielded for the duration
               break;
             case 'noRoll':
-              // Player skips their next roll
               break;
             case 'doubleShot':
-              // Player can shoot twice on their next turn
               break;
           }
         });
       }
     });
   }
-  }
+}
