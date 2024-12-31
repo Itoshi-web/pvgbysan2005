@@ -1,48 +1,70 @@
 export class PowerUpManager {
   constructor() {
-    this.powerUps = new Map();
-    this.cooldowns = new Map();
+    this.powerUps = new Map(); // playerId -> PowerUpState
   }
 
-  getRandomPowerUp() {
-    const types = ['freeze', 'shield', 'noRoll', 'doubleShot'];
-    return types[Math.floor(Math.random() * types.length)];
+  initializePlayer(playerId) {
+    this.powerUps.set(playerId, {
+      currentPowerUp: null,
+      cooldownTurns: 0,
+      activeEffects: []
+    });
   }
 
-  givePowerUp(playerId) {
-    if (this.cooldowns.get(playerId) > 0) {
-      return null;
-    }
-
-    const powerUp = this.getRandomPowerUp();
-    this.powerUps.set(playerId, powerUp);
-    this.cooldowns.set(playerId, 0);
-    return powerUp;
+  canReceivePowerUp(playerId) {
+    const state = this.powerUps.get(playerId);
+    return state && state.cooldownTurns === 0 && !state.currentPowerUp;
   }
 
-  usePowerUp(playerId) {
-    const powerUp = this.powerUps.get(playerId);
-    if (powerUp) {
-      this.powerUps.delete(playerId);
-      this.cooldowns.set(playerId, 2); // Set 2-turn cooldown
-      return powerUp;
-    }
-    return null;
+  grantPowerUp(playerId) {
+    if (!this.canReceivePowerUp(playerId)) return null;
+
+    const powerUps = ['freeze', 'shield', 'noRoll', 'doubleShot'];
+    const randomPowerUp = {
+      type: powerUps[Math.floor(Math.random() * powerUps.length)]
+    };
+
+    const state = this.powerUps.get(playerId);
+    state.currentPowerUp = randomPowerUp;
+    return randomPowerUp;
   }
 
-  decrementCooldowns() {
-    for (const [playerId, cooldown] of this.cooldowns.entries()) {
-      if (cooldown > 0) {
-        this.cooldowns.set(playerId, cooldown - 1);
+  usePowerUp(playerId, targetPlayerId, targetCell) {
+    const state = this.powerUps.get(playerId);
+    if (!state || !state.currentPowerUp) return null;
+
+    const effect = {
+      ...state.currentPowerUp,
+      targetCell,
+      targetPlayer: targetPlayerId
+    };
+
+    state.activeEffects.push(effect);
+    state.currentPowerUp = null;
+    state.cooldownTurns = 2;
+
+    return effect;
+  }
+
+  updateCooldowns() {
+    for (const [playerId, state] of this.powerUps.entries()) {
+      if (state.cooldownTurns > 0) {
+        state.cooldownTurns--;
       }
+
+      // Remove expired effects
+      state.activeEffects = state.activeEffects.filter(effect => effect.turnsLeft > 0);
+      state.activeEffects.forEach(effect => {
+        if (effect.turnsLeft) effect.turnsLeft--;
+      });
     }
   }
 
-  getPlayerPowerUp(playerId) {
+  getPlayerState(playerId) {
     return this.powerUps.get(playerId);
   }
 
-  getPlayerCooldown(playerId) {
-    return this.cooldowns.get(playerId) || 0;
+  removePlayer(playerId) {
+    this.powerUps.delete(playerId);
   }
 }
