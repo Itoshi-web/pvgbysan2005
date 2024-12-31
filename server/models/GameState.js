@@ -1,11 +1,15 @@
 export class GameState {
   constructor(players) {
+    // Number of cells equals number of players
+    const cellCount = players.length;
+    
     this.players = players.map(p => ({
       id: p.id,
       username: p.username,
       eliminated: false,
       firstMove: true,
-      cells: Array(6).fill().map(() => ({
+      // Create cells array with length equal to number of players
+      cells: Array(cellCount).fill().map(() => ({
         stage: 0,
         isActive: false,
         bullets: 0
