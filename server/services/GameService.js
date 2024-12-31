@@ -1,16 +1,26 @@
-import { GameState } from '../models/GameState.js';
 import { Room } from '../models/Room.js';
 
 export class GameService {
   constructor() {
     this.rooms = new Map();
     this.playerSessions = new Map();
+    this.quickMatchQueue = new Map(); // Track players in quick match
   }
 
   createRoom(roomId, maxPlayers, password = null) {
     const room = new Room(roomId, maxPlayers, password);
     this.rooms.set(roomId, room);
     return room;
+  }
+
+  findQuickMatch(username) {
+    // Find an available room (no password, not full)
+    for (const [roomId, room] of this.rooms.entries()) {
+      if (!room.password && !room.isFull() && !room.started) {
+        return roomId;
+      }
+    }
+    return null;
   }
 
   joinRoom(roomId, player, password = null) {
@@ -61,7 +71,6 @@ export class GameService {
 
     const currentPlayer = room.gameState.players[room.gameState.currentPlayer];
     
-    // Check if it's player's first move
     if (currentPlayer.firstMove && value !== 1) {
       room.gameState.gameLog.push({
         type: 'firstMove',
@@ -71,7 +80,6 @@ export class GameService {
       return room;
     }
 
-    // Update the cell based on the roll
     const cell = currentPlayer.cells[value - 1];
     if (!cell.isActive) {
       cell.isActive = true;
@@ -85,7 +93,6 @@ export class GameService {
       room.gameState.lastRoll = value;
       room.gameState.nextTurn();
     } else {
-      // Upgrade cell if not at max level
       if (cell.stage < 6) {
         cell.stage++;
         if (cell.stage === 6) {
@@ -99,10 +106,8 @@ export class GameService {
         room.gameState.lastRoll = value;
         room.gameState.nextTurn();
       } else {
-        // At max level (6), reload bullets and allow shooting
         cell.bullets = Math.min((cell.bullets || 0) + 3, 5);
         room.gameState.lastRoll = value;
-        // Don't call nextTurn() here - player can now shoot
         room.gameState.gameLog.push({
           type: 'reload',
           player: currentPlayer.username,
@@ -123,17 +128,14 @@ export class GameService {
 
     if (!target) throw new Error('Target player not found');
 
-    // Get the cell that's shooting (based on last roll)
     const shooterCell = currentPlayer.cells[room.gameState.lastRoll - 1];
     
     if (!shooterCell || shooterCell.stage !== 6 || !shooterCell.bullets) {
       throw new Error('Invalid shot attempt');
     }
 
-    // Reduce bullets
     shooterCell.bullets--;
 
-    // Destroy target cell
     const targetCellObj = target.cells[targetCell];
     if (!targetCellObj) throw new Error('Target cell not found');
     
@@ -148,7 +150,6 @@ export class GameService {
       cell: targetCell + 1
     });
 
-    // Check if target player is eliminated
     const isEliminated = target.cells.every(cell => !cell.isActive);
     if (isEliminated) {
       target.eliminated = true;
@@ -159,7 +160,6 @@ export class GameService {
       });
     }
 
-    // Move to next turn after shooting
     room.gameState.nextTurn();
     return room;
   }
