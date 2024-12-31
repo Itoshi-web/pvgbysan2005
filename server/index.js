@@ -1,138 +1,117 @@
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
 import cors from 'cors';
 import 'dotenv/config';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import { EVENTS, ORIGINS, PORT } from './config/constants.js';
+import { GameService } from './services/GameService.js';
 
 const app = express();
+const gameService = new GameService();
+
 app.use(cors({
-  origin: [
-    'https://inspiring-macaron-2070dc.netlify.app',
-    'http://localhost:5173'
-  ],
+  origin: ORIGINS,
   methods: ['GET', 'POST'],
   credentials: true
 }));
 
-// Health check endpoint for Render
+// Root route
+app.get('/', (req, res) => {
+  res.status(200).json({ 
+    status: 'online',
+    message: 'Dice Battle Arena Server',
+    version: '1.0.0'
+  });
+});
+
+// Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'healthy' });
 });
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
-  cors: {
-    origin: [
-      'https://lambent-nasturtium-dbb11c.netlify.app',
-      'http://localhost:5173'
-    ],
-    methods: ['GET', 'POST'],
-    credentials: true
-  },
+  cors: { origin: ORIGINS, methods: ['GET', 'POST'], credentials: true },
   transports: ['websocket']
 });
 
-const rooms = new Map();
-const playerSessions = new Map();
-
-io.on('connection', (socket) => {
+io.on(EVENTS.CONNECT, (socket) => {
   console.log('User connected:', socket.id);
 
   socket.on('rejoinRoom', ({ roomId, username }) => {
-    if (!roomId || !username) {
-      socket.emit('error', { message: 'Room ID and username are required' });
-      return;
-    }
-
-    const session = playerSessions.get(username);
-    if (session && rooms.has(session.roomId)) {
-      const room = rooms.get(session.roomId);
-      const playerIndex = room.players.findIndex(p => p.username === username);
-      
-      if (playerIndex !== -1) {
-        // Update socket ID for the rejoining player
-        room.players[playerIndex].id = socket.id;
-        socket.join(roomId);
-        socket.emit('rejoinSuccess', { room });
-        socket.to(roomId).emit('playerRejoined', { username });
+    try {
+      const session = gameService.playerSessions.get(username);
+      if (session && gameService.rooms.has(session.roomId)) {
+        const room = gameService.rooms.get(session.roomId);
+        const playerIndex = room.players.findIndex(p => p.username === username);
+        
+        if (playerIndex !== -1) {
+          room.players[playerIndex].id = socket.id;
+          socket.join(roomId);
+          socket.emit(EVENTS.REJOIN_SUCCESS, { room });
+          socket.to(roomId).emit('playerRejoined', { username });
+        }
       }
+    } catch (error) {
+      socket.emit(EVENTS.ERROR, { message: error.message });
     }
-  });
-
-  socket.on('quickMatch', ({ username }) => {
-    if (!username) {
-      socket.emit('error', { message: 'Username is required' });
-      return;
-    }
-
-    // ... rest of quickMatch logic ...
-    // Make sure to define roomId before using it
-    const roomId = generateRoomId();
-    playerSessions.set(username, {
-      socketId: socket.id,
-      roomId: roomId
-    });
   });
 
   socket.on('createRoom', ({ maxPlayers, password, username }) => {
-    if (!username) {
-      socket.emit('error', { message: 'Username is required' });
-      return;
+    try {
+      const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const room = gameService.createRoom(roomId, maxPlayers, password);
+      const player = { id: socket.id, username, ready: false };
+      
+      gameService.joinRoom(roomId, player, password);
+      socket.join(roomId);
+      socket.emit(EVENTS.ROOM_CREATED, { room });
+    } catch (error) {
+      socket.emit(EVENTS.ERROR, { message: error.message });
     }
-
-    const roomId = generateRoomId();
-    playerSessions.set(username, {
-      socketId: socket.id,
-      roomId: roomId
-    });
-    // ... rest of createRoom logic ...
   });
 
   socket.on('joinRoom', ({ roomId, password, username }) => {
-    if (!roomId || !username) {
-      socket.emit('error', { message: 'Room ID and username are required' });
-      return;
+    try {
+      const player = { id: socket.id, username, ready: false };
+      const room = gameService.joinRoom(roomId, player, password);
+      
+      socket.join(roomId);
+      io.to(roomId).emit(EVENTS.PLAYER_JOINED, { room });
+    } catch (error) {
+      socket.emit(EVENTS.ERROR, { message: error.message });
     }
-
-    playerSessions.set(username, {
-      socketId: socket.id,
-      roomId: roomId
-    });
-    // ... rest of joinRoom logic ...
   });
 
   socket.on('leaveRoom', () => {
-    // Find the session for this socket
-    let userSession;
-    for (const [username, session] of playerSessions.entries()) {
-      if (session.socketId === socket.id) {
-        userSession = { username, ...session };
-        playerSessions.delete(username);
-        break;
+    try {
+      for (const [roomId, room] of gameService.rooms.entries()) {
+        const playerIndex = room.players.findIndex(p => p.id === socket.id);
+        if (playerIndex !== -1) {
+          const username = room.players[playerIndex].username;
+          room.removePlayer(socket.id);
+          
+          if (room.isEmpty()) {
+            gameService.rooms.delete(roomId);
+          } else {
+            socket.to(roomId).emit(EVENTS.PLAYER_LEFT, { room, username });
+          }
+          
+          socket.leave(roomId);
+          break;
+        }
       }
-    }
-
-    if (userSession && rooms.has(userSession.roomId)) {
-      const room = rooms.get(userSession.roomId);
-      // ... handle room cleanup ...
+    } catch (error) {
+      socket.emit(EVENTS.ERROR, { message: error.message });
     }
   });
 
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
+    // Handle disconnection logic here
   });
 });
 
-function generateRoomId() {
-  return Math.random().toString(36).substring(2, 8).toUpperCase();
-}
-
-const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
