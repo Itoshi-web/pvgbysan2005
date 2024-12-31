@@ -9,6 +9,11 @@ export class ShootHandler {
     const shooterCell = currentPlayer.cells[lastRoll - 1];
     const targetCellObj = target.cells[targetCell];
 
+    // Ensure the shooter has bullets in the cell that matches the last roll
+    if (!shooterCell || !shooterCell.bullets || shooterCell.bullets <= 0) {
+      throw new Error('No bullets available in the rolled cell');
+    }
+
     shooterCell.bullets--;
     targetCellObj.isActive = false;
     targetCellObj.stage = 0;
@@ -40,7 +45,7 @@ export class ShootHandler {
     if (!shooterCell) throw new Error('Invalid shooter cell');
     if (!shooterCell.isActive) throw new Error('Shooter cell is not active');
     if (shooterCell.stage !== 6) throw new Error('Cell must be at stage 6 to shoot');
-    if (!shooterCell.bullets || shooterCell.bullets <= 0) throw new Error('No bullets available');
+    if (!shooterCell.bullets || shooterCell.bullets <= 0) throw new Error(`No bullets available in cell ${lastRoll}`);
 
     const targetCellObj = target.cells[targetCell];
     if (!targetCellObj) throw new Error('Target cell not found');
