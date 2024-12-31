@@ -14,7 +14,7 @@ export const EVENTS = {
 };
 
 export const ORIGINS = [
-  'https://inspiring-macaron-2070dc.netlify.app/',
+  'https://stellar-daffodil-7e576c.netlify.app',
   'http://localhost:5173'
 ];
 
