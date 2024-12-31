@@ -28,7 +28,7 @@ const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
     origin: [
-      'https://lambent-nasturtium-dbb11c.netlify.app',
+      'https://inspiring-macaron-2070dc.netlify.app',
       'http://localhost:5173'
     ],
     methods: ['GET', 'POST'],
