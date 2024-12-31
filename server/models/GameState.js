@@ -1,23 +1,20 @@
 export class GameState {
-  constructor(players) {
-    // Number of cells equals number of players
-    const cellCount = players.length;
-    
+  constructor(players, firstPlayer = 0) {
     this.players = players.map(p => ({
       id: p.id,
       username: p.username,
       eliminated: false,
       firstMove: true,
-      // Create cells array with length equal to number of players
-      cells: Array(cellCount).fill().map(() => ({
+      cells: Array(players.length).fill().map(() => ({
         stage: 0,
         isActive: false,
         bullets: 0
       }))
     }));
-    this.currentPlayer = 0;
+    this.currentPlayer = firstPlayer;
     this.lastRoll = null;
     this.gameLog = [];
+    this.turnSkips = new Map(); // Track consecutive turn skips
   }
 
   nextTurn() {
@@ -29,5 +26,15 @@ export class GameState {
   checkWinner() {
     const activePlayers = this.players.filter(p => !p.eliminated);
     return activePlayers.length === 1 ? activePlayers[0] : null;
+  }
+
+  addTurnSkip(playerId) {
+    const skips = (this.turnSkips.get(playerId) || 0) + 1;
+    this.turnSkips.set(playerId, skips);
+    return skips;
+  }
+
+  resetTurnSkips(playerId) {
+    this.turnSkips.set(playerId, 0);
   }
 }
