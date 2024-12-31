@@ -8,9 +8,13 @@ export class GameService {
     this.playerSessions = new Map();
     this.quickMatchQueue = new Map();
     this.powerUpManager = new PowerUpManager();
+    this.turnTimers = new Map(); // Store turn timers for each room
   }
 
   createRoom(roomId, maxPlayers, password = null) {
+    if (maxPlayers < 2 || maxPlayers > 5) {
+      throw new Error('Invalid number of players. Must be between 2 and 5.');
+    }
     const room = new Room(roomId, maxPlayers, password);
     this.rooms.set(roomId, room);
     return room;
@@ -44,19 +48,6 @@ export class GameService {
     return room;
   }
 
-  togglePlayerReady(roomId, username) {
-    const room = this.rooms.get(roomId);
-    if (!room) throw new Error('Room not found');
-
-    const player = room.players.find(p => p.username === username);
-    if (!player) throw new Error('Player not found');
-
-    if (player === room.players[0]) return room;
-
-    player.ready = !player.ready;
-    return room;
-  }
-
   startGame(roomId) {
     const room = this.rooms.get(roomId);
     if (!room) throw new Error('Room not found');
@@ -64,9 +55,34 @@ export class GameService {
     const allPlayersReady = room.players.slice(1).every(player => player.ready);
     if (!allPlayersReady) throw new Error('Not all players are ready');
     
+    // Randomly determine first player
+    const firstPlayer = Math.floor(Math.random() * room.players.length);
+    
     room.started = true;
-    room.gameState = new GameState(room.players);
+    room.gameState = new GameState(room.players, firstPlayer);
+
+    // Start turn timer
+    this.startTurnTimer(roomId);
+    
     return room;
+  }
+
+  startTurnTimer(roomId) {
+    // Clear existing timer if any
+    if (this.turnTimers.has(roomId)) {
+      clearTimeout(this.turnTimers.get(roomId));
+    }
+
+    const timer = setTimeout(() => {
+      const room = this.rooms.get(roomId);
+      if (room && room.gameState) {
+        // Skip turn if timer expires
+        room.gameState.nextTurn();
+        this.startTurnTimer(roomId); // Start timer for next player
+      }
+    }, 30000); // 30 seconds
+
+    this.turnTimers.set(roomId, timer);
   }
 
   handleRoll(roomId, value) {
@@ -75,6 +91,12 @@ export class GameService {
 
     const currentPlayer = room.gameState.players[room.gameState.currentPlayer];
     
+    // Validate roll value based on number of players
+    const maxRoll = room.players.length === 5 ? 6 : room.players.length;
+    if (value > maxRoll) {
+      throw new Error(`Invalid roll. Maximum value for ${room.players.length} players is ${maxRoll}`);
+    }
+
     // Check for first move - must roll a 1
     if (currentPlayer.firstMove && value !== 1) {
       room.gameState.gameLog.push({
@@ -83,6 +105,7 @@ export class GameService {
         message: 'Must roll a 1 to start'
       });
       room.gameState.nextTurn();
+      this.startTurnTimer(roomId);
       return { room };
     }
 
@@ -108,6 +131,7 @@ export class GameService {
         message: 'Turn skipped due to No Roll effect'
       });
       room.gameState.nextTurn();
+      this.startTurnTimer(roomId);
       return { room };
     }
 
@@ -132,7 +156,7 @@ export class GameService {
           });
         }
       } else if (targetCell.bullets < 5) {
-        targetCell.bullets++;
+        targetCell.bullets = 5; // Refill bullets
         room.gameState.gameLog.push({
           type: 'reload',
           player: currentPlayer.username,
@@ -188,7 +212,7 @@ export class GameService {
     // Perform the shot
     shooterCell.bullets--;
 
-    // Destroy target cell
+    // Reset target cell to stage 0
     targetCellObj.isActive = false;
     targetCellObj.stage = 0;
     targetCellObj.bullets = 0;
@@ -210,11 +234,42 @@ export class GameService {
         player: target.username,
         shooter: currentPlayer.username
       });
+
+      // Check for game end
+      const remainingPlayers = room.gameState.players.filter(p => !p.eliminated);
+      if (remainingPlayers.length === 1) {
+        const winner = remainingPlayers[0];
+        const history = {
+          winner: winner.username,
+          eliminations: room.gameState.gameLog
+            .filter(log => log.type === 'eliminate')
+            .map(log => ({
+              eliminator: log.shooter,
+              eliminated: log.player
+            })),
+          playerStats: Object.fromEntries(
+            room.gameState.players.map(player => [
+              player.username,
+              {
+                shotsFired: player.cells.reduce((acc, cell) => acc + (5 - (cell.bullets || 0)), 0),
+                eliminations: room.gameState.gameLog.filter(log => 
+                  log.type === 'eliminate' && log.shooter === player.username
+                ).length,
+                timesTargeted: room.gameState.gameLog.filter(log =>
+                  log.type === 'shoot' && log.target === player.username
+                ).length
+              }
+            ])
+          )
+        };
+        return { room, gameEnded: true, history };
+      }
     }
 
     // Move to next turn
     room.gameState.nextTurn();
-    return room;
+    this.startTurnTimer(roomId);
+    return { room };
   }
 
   handlePowerUp(roomId, playerId, targetPlayerId, targetCell) {
@@ -263,5 +318,13 @@ export class GameService {
         });
       }
     });
+  }
+
+  cleanup() {
+    // Clear all turn timers when shutting down
+    for (const timer of this.turnTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.turnTimers.clear();
   }
 }
