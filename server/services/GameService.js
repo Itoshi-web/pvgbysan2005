@@ -37,7 +37,6 @@ export class GameService {
     const player = room.players.find(p => p.username === username);
     if (!player) throw new Error('Player not found');
 
-    // Don't toggle ready state for the host (first player)
     if (player === room.players[0]) return room;
 
     player.ready = !player.ready;
@@ -48,7 +47,6 @@ export class GameService {
     const room = this.rooms.get(roomId);
     if (!room) throw new Error('Room not found');
     
-    // Check if all non-host players are ready
     const allPlayersReady = room.players.slice(1).every(player => player.ready);
     if (!allPlayersReady) throw new Error('Not all players are ready');
     
@@ -112,6 +110,7 @@ export class GameService {
         });
       }
     }
+
     return room;
   }
 
@@ -121,6 +120,8 @@ export class GameService {
 
     const currentPlayer = room.gameState.players[room.gameState.currentPlayer];
     const target = room.gameState.players[targetPlayer];
+
+    if (!target) throw new Error('Target player not found');
 
     // Get the cell that's shooting (based on last roll)
     const shooterCell = currentPlayer.cells[room.gameState.lastRoll - 1];
@@ -134,6 +135,8 @@ export class GameService {
 
     // Destroy target cell
     const targetCellObj = target.cells[targetCell];
+    if (!targetCellObj) throw new Error('Target cell not found');
+    
     targetCellObj.isActive = false;
     targetCellObj.stage = 0;
     targetCellObj.bullets = 0;
@@ -156,6 +159,7 @@ export class GameService {
       });
     }
 
+    // Move to next turn after shooting
     room.gameState.nextTurn();
     return room;
   }
