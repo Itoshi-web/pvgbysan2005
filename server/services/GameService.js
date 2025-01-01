@@ -12,6 +12,7 @@ export class GameService {
     this.powerUpManager = new PowerUpManager();
     this.rollHandler = new RollHandler(this.powerUpManager);
     this.shootHandler = new ShootHandler();
+    this.disconnectionTimers = new Map();
   }
 
   createRoom(roomId, maxPlayers, password = null) {
@@ -48,12 +49,80 @@ export class GameService {
     room.addPlayer(player);
     this.playerSessions.set(player.username, {
       socketId: player.id,
-      roomId: roomId
+      roomId: roomId,
+      lastActive: Date.now()
     });
     
     this.powerUpManager.initializePlayer(player.id);
     
     return room;
+  }
+
+  handlePlayerDisconnect(socketId) {
+    let affectedRoom = null;
+    let disconnectedPlayer = null;
+
+    for (const [roomId, room] of this.rooms.entries()) {
+      const playerIndex = room.players.findIndex(p => p.id === socketId);
+      if (playerIndex !== -1) {
+        disconnectedPlayer = room.players[playerIndex];
+        affectedRoom = room;
+
+        // Start a 30-second timer for this player
+        const timer = setTimeout(() => {
+          this.removePlayerFromRoom(socketId, roomId);
+        }, 30000);
+
+        this.disconnectionTimers.set(socketId, {
+          timer,
+          roomId,
+          username: disconnectedPlayer.username
+        });
+
+        break;
+      }
+    }
+
+    return { room: affectedRoom, player: disconnectedPlayer };
+  }
+
+  handlePlayerReconnect(socketId, username) {
+    const timerInfo = this.disconnectionTimers.get(socketId);
+    if (timerInfo) {
+      clearTimeout(timerInfo.timer);
+      this.disconnectionTimers.delete(socketId);
+      
+      const room = this.rooms.get(timerInfo.roomId);
+      if (room) {
+        const playerIndex = room.players.findIndex(p => p.username === username);
+        if (playerIndex !== -1) {
+          room.players[playerIndex].id = socketId;
+          return { success: true, room };
+        }
+      }
+    }
+    return { success: false };
+  }
+
+  removePlayerFromRoom(socketId, roomId) {
+    const room = this.rooms.get(roomId);
+    if (!room) return;
+
+    const playerIndex = room.players.findIndex(p => p.id === socketId);
+    if (playerIndex !== -1) {
+      const player = room.players[playerIndex];
+      room.removePlayer(socketId);
+      this.playerSessions.delete(player.username);
+      this.powerUpManager.removePlayer(socketId);
+
+      // If room is empty or host left, clean up the room
+      if (room.isEmpty() || playerIndex === 0) {
+        this.rooms.delete(roomId);
+        return { roomDeleted: true, player };
+      }
+
+      return { roomDeleted: false, player };
+    }
   }
 
   startGame(roomId) {
@@ -72,18 +141,6 @@ export class GameService {
     room.gameState.maxDiceValue = room.players.length === 5 ? 6 : room.players.length;
     
     return room;
-  }
-
-  handleRoll(roomId, value) {
-    const room = this.rooms.get(roomId);
-    if (!room || !room.gameState) throw new Error('Game not found');
-    return this.rollHandler.handle(room, value);
-  }
-
-  handleShoot(roomId, targetPlayer, targetCell) {
-    const room = this.rooms.get(roomId);
-    if (!room || !room.gameState) throw new Error('Game not found');
-    return this.shootHandler.handle(room, targetPlayer, targetCell);
   }
 
   togglePlayerReady(roomId, username) {
