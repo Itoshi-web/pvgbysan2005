@@ -10,14 +10,34 @@ export class RollHandler {
       throw new Error('Invalid dice value');
     }
 
-    if (this.handleFirstMove(room, currentPlayer, value)) {
-      return { room };
+    // Handle first move - must roll a 1
+    if (currentPlayer.firstMove) {
+      if (value !== 1) {
+        room.gameState.gameLog.push({
+          type: 'firstMove',
+          player: currentPlayer.username,
+          message: 'Must roll a 1 to start'
+        });
+        room.gameState.nextTurn();
+        return { room };
+      }
+      // If they roll a 1, mark firstMove as false and continue
+      currentPlayer.firstMove = false;
     }
 
-    if (this.handlePowerUpRoll(room, currentPlayer, value)) {
-      return { room };
+    // Handle power-up roll (rolling 6 in 5-player game)
+    if (room.players.length === 5 && value === 6) {
+      const powerUp = this.powerUpManager.grantPowerUp(currentPlayer.id);
+      if (powerUp) {
+        room.gameState.gameLog.push({
+          type: 'powerUp',
+          player: currentPlayer.username,
+          powerUpType: powerUp.type
+        });
+      }
     }
 
+    // Check for no-roll effect
     if (this.handleNoRollEffect(room, currentPlayer)) {
       return { room };
     }
@@ -31,34 +51,40 @@ export class RollHandler {
       return { room };
     }
 
-    return this.handleCellUpdate(room, currentPlayer, targetCell, value);
-  }
-
-  handleFirstMove(room, currentPlayer, value) {
-    if (currentPlayer.firstMove && value !== 1) {
+    // Handle cell update and advance turn
+    if (!targetCell.isActive) {
+      targetCell.isActive = true;
+      targetCell.stage = 1;
       room.gameState.gameLog.push({
-        type: 'firstMove',
+        type: 'activate',
         player: currentPlayer.username,
-        message: 'Must roll a 1 to start'
+        cell: value
       });
-      room.gameState.nextTurn();
-      return true;
-    }
-    return false;
-  }
-
-  handlePowerUpRoll(room, currentPlayer, value) {
-    if (room.players.length === 5 && value === 6) {
-      const powerUp = this.powerUpManager.grantPowerUp(currentPlayer.id);
-      if (powerUp) {
+    } else {
+      if (targetCell.stage < 6) {
+        targetCell.stage++;
+        if (targetCell.stage === 6) {
+          targetCell.bullets = 5;
+          room.gameState.gameLog.push({
+            type: 'maxLevel',
+            player: currentPlayer.username,
+            cell: value
+          });
+        }
+      } else if (targetCell.bullets < 5) {
+        targetCell.bullets++;
         room.gameState.gameLog.push({
-          type: 'powerUp',
+          type: 'reload',
           player: currentPlayer.username,
-          powerUpType: powerUp.type
+          cell: value
         });
       }
     }
-    return false;
+
+    // Always advance turn after a successful move
+    room.gameState.nextTurn();
+    room.gameState.lastRoll = value;
+    return { room };
   }
 
   handleNoRollEffect(room, currentPlayer) {
@@ -74,45 +100,4 @@ export class RollHandler {
     }
     return false;
   }
-
-  handleCellUpdate(room, currentPlayer, targetCell, value) {
-    if (!targetCell.isActive) {
-      targetCell.isActive = true;
-      targetCell.stage = 1;
-      room.gameState.gameLog.push({
-        type: 'activate',
-        player: currentPlayer.username,
-        cell: value
-      });
-      room.gameState.nextTurn();
-    } else {
-      if (targetCell.stage < 6) {
-        targetCell.stage++;
-        if (targetCell.stage === 6) {
-          targetCell.bullets = 5;
-          room.gameState.gameLog.push({
-            type: 'maxLevel',
-            player: currentPlayer.username,
-            cell: value
-          });
-        }
-        room.gameState.nextTurn();
-      } else if (targetCell.bullets < 5) {
-        targetCell.bullets++;
-        room.gameState.gameLog.push({
-          type: 'reload',
-          player: currentPlayer.username,
-          cell: value
-        });
-        room.gameState.nextTurn();
-      }
-    }
-
-    if (currentPlayer.firstMove) {
-      currentPlayer.firstMove = false;
-    }
-
-    room.gameState.lastRoll = value;
-    return { room };
-  }
-}
+}}
