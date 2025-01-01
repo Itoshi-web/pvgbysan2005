@@ -14,7 +14,7 @@ export const EVENTS = {
 };
 
 export const ORIGINS = [
-  'https://bespoke-biscochitos-2fa21a.netlify.app/',
+  'https://elaborate-tanuki-fd7e3b.netlify.app/',
   'http://localhost:5173'
 ];
 
