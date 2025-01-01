@@ -40,37 +40,37 @@ export class GameService {
     }
     if (room.isFull()) throw new Error('Room is full');
     if (room.started) throw new Error('Game already started');
-    
+
     if (room.players.some(p => p.username === player.username)) {
       throw new Error('Username already taken in this room');
     }
-    
+
     room.addPlayer(player);
     this.playerSessions.set(player.username, {
       socketId: player.id,
       roomId: roomId
     });
-    
+
     this.powerUpManager.initializePlayer(player.id);
-    
+
     return room;
   }
 
   startGame(roomId) {
     const room = this.rooms.get(roomId);
     if (!room) throw new Error('Room not found');
-    
+
     const allPlayersReady = room.players.slice(1).every(player => player.ready);
     if (!allPlayersReady) throw new Error('Not all players are ready');
-    
+
     if (room.players.length < 2) {
       throw new Error('Need at least 2 players to start');
     }
-    
+
     room.started = true;
     room.gameState = new GameState(room.players);
     room.gameState.maxDiceValue = room.players.length === 5 ? 6 : room.players.length;
-    
+
     return room;
   }
 
