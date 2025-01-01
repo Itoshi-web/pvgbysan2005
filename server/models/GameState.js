@@ -1,7 +1,7 @@
 export class GameState {
   constructor(players) {
-    // Number of cells equals number of players
-    const cellCount = players.length;
+    // Number of cells equals number of players, but capped at 5
+    const cellCount = players.length <= 5 ? players.length : 5;
     
     this.players = players.map(p => ({
       id: p.id,
