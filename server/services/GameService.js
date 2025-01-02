@@ -1,68 +1,104 @@
 import { Room } from '../models/Room.js';
 import { GameState } from '../models/GameState.js';
+import { PowerUpManager } from '../models/PowerUpManager.js';
+import { RollHandler } from '../handlers/RollHandler.js';
+import { ShootHandler } from '../handlers/ShootHandler.js';
 
 export class GameService {
   constructor() {
     this.rooms = new Map();
     this.playerSessions = new Map();
+    this.quickMatchQueue = new Map();
+    this.powerUpManager = new PowerUpManager();
+    this.rollHandler = new RollHandler(this.powerUpManager);
+    this.shootHandler = new ShootHandler();
   }
 
-  // ... (keep all other methods unchanged)
-
-  /**
-   * Handle a player's shoot action.
-   * @param {string} roomId - The room ID.
-   * @param {string} targetPlayer - The target player's username.
-   * @param {number} targetCell - The target cell index.
-   * @returns {Room} - The updated room instance.
-   */
-  handleShoot(roomId, targetPlayer, targetCell) {
-    const room = this.rooms.get(roomId);
-
-    if (!room || !room.gameState) {
-      throw new Error('Game not found');
+  createRoom(roomId, maxPlayers, password = null) {
+    if (maxPlayers < 2 || maxPlayers > 5) {
+      throw new Error('Invalid number of players');
     }
-
-    const currentPlayer = room.gameState.players[room.gameState.currentPlayer];
-    const target = room.gameState.players.find(p => p.username === targetPlayer);
-
-    if (!target) {
-      throw new Error('Target player not found');
-    }
-
-    // Get the shooter's cell based on the last roll
-    const shooterCell = currentPlayer.cells[room.gameState.lastRoll - 1];
-
-    // Check if the shooter's cell has bullets
-    if (!shooterCell || shooterCell.stage !== 6 || !shooterCell.bullets) {
-      throw new Error('No bullets available');
-    }
-
-    // Get the target cell
-    const targetCellObj = target.cells[targetCell];
-    if (!targetCellObj || !targetCellObj.isActive) {
-      throw new Error('Invalid target cell - cell must be active');
-    }
-
-    // Deduct a bullet from the shooter's cell
-    shooterCell.bullets--;
-
-    // Reset the target cell to stage 0
-    targetCellObj.isActive = false;
-    targetCellObj.stage = 0;
-    targetCellObj.bullets = 0;
-
-    // Log the shooting action
-    room.gameState.logAction('shoot', currentPlayer.username, `Shot cell ${targetCell + 1} of ${targetPlayer}`);
-
-    // Check if the target player is eliminated
-    if (target.cells.every(cell => !cell.isActive)) {
-      target.eliminated = true;
-      room.gameState.logAction('eliminate', currentPlayer.username, `Eliminated ${targetPlayer}`);
-    }
-
-    // Move to next turn
-    room.gameState.nextTurn();
+    const room = new Room(roomId, maxPlayers, password);
+    this.rooms.set(roomId, room);
     return room;
   }
+
+  findQuickMatch(username) {
+    for (const [roomId, room] of this.rooms.entries()) {
+      if (!room.password && !room.isFull() && !room.started) {
+        return roomId;
+      }
+    }
+    return null;
+  }
+
+  joinRoom(roomId, player, password = null) {
+    const room = this.rooms.get(roomId);
+    if (!room) throw new Error('Room not found');
+    if (room.password && room.password !== password) {
+      throw new Error('Invalid password');
+    }
+    if (room.isFull()) throw new Error('Room is full');
+    if (room.started) throw new Error('Game already started');
+    
+    if (room.players.some(p => p.username === player.username)) {
+      throw new Error('Username already taken in this room');
+    }
+    
+    room.addPlayer(player);
+    this.playerSessions.set(player.username, {
+      socketId: player.id,
+      roomId: roomId
+    });
+    
+    this.powerUpManager.initializePlayer(player.id);
+    
+    return room;
+  }
+
+  startGame(roomId) {
+    const room = this.rooms.get(roomId);
+    if (!room) throw new Error('Room not found');
+    
+    const allPlayersReady = room.players.slice(1).every(player => player.ready);
+    if (!allPlayersReady) throw new Error('Not all players are ready');
+    
+    if (room.players.length < 2) {
+      throw new Error('Need at least 2 players to start');
+    }
+    
+    room.started = true;
+    room.gameState = new GameState(room.players);
+    room.gameState.maxDiceValue = room.players.length === 5 ? 6 : room.players.length;
+    
+    return room;
+  }
+
+  handleRoll(roomId, value) {
+    const room = this.rooms.get(roomId);
+    if (!room || !room.gameState) throw new Error('Game not found');
+    return this.rollHandler.handle(room, value);
+  }
+
+  handleShoot(roomId, targetPlayer, targetCell) {
+    const room = this.rooms.get(roomId);
+    if (!room || !room.gameState) throw new Error('Game not found');
+    return this.shootHandler.handle(room, targetPlayer, targetCell);
+  }
+
+  togglePlayerReady(roomId, username) {
+    const room = this.rooms.get(roomId);
+    if (!room) throw new Error('Room not found');
+
+    const player = room.players.find(p => p.username === username);
+    if (!player) throw new Error('Player not found');
+
+    // Host (first player) can't toggle ready state
+    if (player === room.players[0]) return room;
+
+    player.ready = !player.ready;
+    return room;
+  }
+
+  // Other methods remain the same...
 }

@@ -15,49 +15,57 @@ export class GameState {
         bullets: 0
       }))
     }));
+    
     this.currentPlayer = 0;
     this.lastRoll = null;
-    this.gameLog = []; // Array to store game logs
+    this.gameLog = [];
+    this.maxDiceValue = players.length === 5 ? 6 : players.length;
+    this.turnTimer = 30; // 30 seconds per turn
+    this.consecutiveSkips = new Map(); // Track consecutive skips for each player
   }
 
-  /**
-   * Move to the next player's turn.
-   */
   nextTurn() {
     do {
       this.currentPlayer = (this.currentPlayer + 1) % this.players.length;
     } while (this.players[this.currentPlayer].eliminated);
+    
+    // Reset turn timer
+    this.turnTimer = 30;
   }
 
-  /**
-   * Check if there's a winner.
-   * @returns {object|null} The winning player or null if no winner.
-   */
   checkWinner() {
     const activePlayers = this.players.filter(p => !p.eliminated);
     return activePlayers.length === 1 ? activePlayers[0] : null;
   }
 
-  /**
-   * Log an action performed in the game.
-   * @param {string} type - The type of action (e.g., 'roll', 'shoot', 'activate').
-   * @param {string} player - The player who performed the action.
-   * @param {string} message - A descriptive message about the action.
-   */
-  logAction(type, player, message) {
-    this.gameLog.push({
-      type,
-      player,
-      message,
-      timestamp: new Date()
-    });
+  handleSkip(playerId) {
+    const skips = this.consecutiveSkips.get(playerId) || 0;
+    this.consecutiveSkips.set(playerId, skips + 1);
+
+    // If player skips twice in a row, freeze a random cell
+    if (skips + 1 >= 2) {
+      const player = this.players.find(p => p.id === playerId);
+      if (player) {
+        const activeCells = player.cells
+          .map((cell, index) => ({ cell, index }))
+          .filter(({ cell }) => cell.isActive);
+
+        if (activeCells.length > 0) {
+          const randomCell = activeCells[Math.floor(Math.random() * activeCells.length)];
+          // Apply freeze effect to the cell
+          this.gameLog.push({
+            type: 'autoFreeze',
+            player: player.username,
+            cell: randomCell.index + 1,
+            message: 'Cell frozen due to consecutive skips'
+          });
+        }
+      }
+      this.consecutiveSkips.set(playerId, 0);
+    }
   }
 
-  /**
-   * Get the game logs.
-   * @returns {Array} Array of logged game actions.
-   */
-  getLogs() {
-    return this.gameLog;
+  resetSkips(playerId) {
+    this.consecutiveSkips.set(playerId, 0);
   }
 }
