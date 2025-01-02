@@ -1,22 +1,33 @@
 export class GameState {
   constructor(players) {
-    // Initialize players with default values
-    this.players = players.map(player => ({
-      id: player.id,
-      username: player.username,
-      bullets: 5, // Initialize with 5 bullets by default
-      cells: Array(6).fill({ isDestroyed: false }) // Assuming 6 cells per player
+    // Number of cells equals number of players
+    const cellCount = players.length;
+    
+    this.players = players.map(p => ({
+      id: p.id,
+      username: p.username,
+      eliminated: false,
+      firstMove: true,
+      // Create cells array with length equal to number of players
+      cells: Array(cellCount).fill().map(() => ({
+        stage: 0,
+        isActive: false,
+        bullets: 0
+      }))
     }));
-    this.currentPlayerIndex = 0; // Track the current player by index
+    this.currentPlayer = 0;
+    this.lastRoll = null;
+    this.gameLog = [];
   }
 
-  // Get the current player based on the current player index
-  getCurrentPlayer() {
-    return this.players[this.currentPlayerIndex];
-  }
-
-  // Move to the next turn by updating the current player index
   nextTurn() {
-    this.currentPlayerIndex = (this.currentPlayerIndex + 1) % this.players.length;
+    do {
+      this.currentPlayer = (this.currentPlayer + 1) % this.players.length;
+    } while (this.players[this.currentPlayer].eliminated);
+  }
+
+  checkWinner() {
+    const activePlayers = this.players.filter(p => !p.eliminated);
+    return activePlayers.length === 1 ? activePlayers[0] : null;
   }
 }

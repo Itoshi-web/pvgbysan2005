@@ -37,23 +37,27 @@ io.on(EVENTS.CONNECT, (socket) => {
   console.log('User connected:', socket.id);
 
   socket.on('rejoinRoom', ({ roomId, username }) => {
-    try {
-      const session = gameService.playerSessions.get(username);
-      if (session && gameService.rooms.has(session.roomId)) {
-        const room = gameService.rooms.get(session.roomId);
-        const playerIndex = room.players.findIndex(p => p.username === username);
-        
-        if (playerIndex !== -1) {
-          room.players[playerIndex].id = socket.id;
-          socket.join(roomId);
-          socket.emit(EVENTS.REJOIN_SUCCESS, { room });
-          socket.to(roomId).emit('playerRejoined', { username });
-        }
-      }
-    } catch (error) {
-      socket.emit(EVENTS.ERROR, { message: error.message });
+  try {
+    const session = gameService.playerSessions.get(username);
+    if (!session || session.roomId !== roomId) {
+      throw new Error('Invalid session or room ID');
     }
-  });
+
+    const room = gameService.rooms.get(roomId);
+    if (!room) throw new Error('Room not found');
+
+    const playerIndex = room.players.findIndex(p => p.username === username);
+    if (playerIndex !== -1) {
+      room.players[playerIndex].id = socket.id;
+      socket.join(roomId);
+      socket.emit(EVENTS.REJOIN_SUCCESS, { room });
+      socket.to(roomId).emit('playerRejoined', { username });
+    }
+  } catch (error) {
+    socket.emit(EVENTS.ERROR, { message: error.message });
+  }
+});
+
 
   socket.on('quickMatch', ({ username }) => {
     try {
@@ -140,15 +144,9 @@ io.on(EVENTS.CONNECT, (socket) => {
 
       let updatedRoom;
       switch (action) {
-        case 'roll': {
-          const result = gameService.handleRoll(roomId, data.value);
-          updatedRoom = result.room;
-          
-          if (result.powerUp) {
-            socket.emit('powerUpReceived', { powerUp: result.powerUp });
-          }
+        case 'roll':
+          updatedRoom = gameService.handleRoll(roomId, data.value);
           break;
-        }
         case 'shoot':
           updatedRoom = gameService.handleShoot(roomId, data.targetPlayer, data.targetCell);
           break;
@@ -226,32 +224,6 @@ io.on(EVENTS.CONNECT, (socket) => {
       io.to(roomId).emit('emote', { username: player.username, emote });
     } catch (error) {
       socket.emit(EVENTS.ERROR, { message: error.message });
-    }
-  });
-
-  socket.on('usePowerUp', ({ roomId, targetPlayer, targetCell }) => {
-    try {
-      const room = gameService.rooms.get(roomId);
-      if (!room) throw new Error('Room not found');
-
-      const player = room.players.find(p => p.id === socket.id);
-      if (!player) throw new Error('Player not found');
-
-      const { room: updatedRoom, effect } = gameService.handlePowerUp(
-        roomId,
-        player.id,
-        targetPlayer,
-        targetCell
-      );
-
-      io.to(roomId).emit('powerUpUsed', {
-        room: updatedRoom,
-        effect,
-        player: player.username,
-        target: room.players.find(p => p.id === targetPlayer)?.username
-      });
-    } catch (error) {
-      socket.emit('error', { message: error.message });
     }
   });
 

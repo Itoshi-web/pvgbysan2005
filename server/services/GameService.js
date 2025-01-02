@@ -1,175 +1,216 @@
 import { Room } from '../models/Room.js';
 import { GameState } from '../models/GameState.js';
-import { PowerUpManager } from '../models/PowerUpManager.js';
-import { RollHandler } from '../handlers/RollHandler.js';
-import { ShootHandler } from '../handlers/ShootHandler.js';
 
 export class GameService {
   constructor() {
-    this.rooms = new Map(); // Stores all active rooms
-    this.playerSessions = new Map(); // Maps players to their session details
-    this.quickMatchQueue = new Map(); // Manages the queue for quick matches
-    this.powerUpManager = new PowerUpManager(); // Handles power-ups
-    this.rollHandler = new RollHandler(this.powerUpManager); // Handles dice rolls and power-up logic
-    this.shootHandler = new ShootHandler(); // Handles shooting logic
+    this.rooms = new Map();
+    this.playerSessions = new Map();
   }
 
-  // Creates a new room with a given ID, max player count, and optional password
+  /**
+   * Create a new room.
+   * @param {string} roomId - Unique identifier for the room.
+   * @param {number} maxPlayers - Maximum number of players in the room.
+   * @param {string|null} password - Optional password for the room.
+   * @returns {Room} - The created room instance.
+   */
   createRoom(roomId, maxPlayers, password = null) {
-    if (maxPlayers < 2 || maxPlayers > 5) {
-      throw new Error('Invalid number of players');
+    if (this.rooms.has(roomId)) {
+      throw new Error('Room ID already exists');
     }
+
     const room = new Room(roomId, maxPlayers, password);
     this.rooms.set(roomId, room);
     return room;
   }
 
-  // Allows a player to join a specific room
+  /**
+   * Find an available room for quick match.
+   * @returns {string|null} - Room ID if found, else null.
+   */
+  findQuickMatch() {
+    for (const [roomId, room] of this.rooms.entries()) {
+      if (!room.password && !room.isFull() && !room.started) {
+        return roomId;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Add a player to a room.
+   * @param {string} roomId - The room ID.
+   * @param {object} player - The player object.
+   * @param {string|null} password - Password for the room (if any).
+   * @returns {Room} - The room instance.
+   */
   joinRoom(roomId, player, password = null) {
     const room = this.rooms.get(roomId);
-    if (!room) throw new Error('Room not found');
+
+    if (!room) {
+      throw new Error('Room not found');
+    }
+
     if (room.password && room.password !== password) {
       throw new Error('Invalid password');
     }
-    if (room.isFull()) throw new Error('Room is full');
-    if (room.started) throw new Error('Game already started');
 
-    if (room.players.some(p => p.username === player.username)) {
-      throw new Error('Username already taken in this room');
+    if (room.isFull()) {
+      throw new Error('Room is full');
     }
 
-    // Ensure bullets are initialized for the player
-    player.bullets = player.bullets || 0;
-
     room.addPlayer(player);
-    this.playerSessions.set(player.username, {
-      socketId: player.id,
-      roomId: roomId
-    });
-
-    this.powerUpManager.initializePlayer(player.id);
+    this.playerSessions.set(player.username, { socketId: player.id, roomId });
 
     return room;
   }
 
-  // Handles shooting action in the game
+  /**
+   * Toggle a player's ready state.
+   * @param {string} roomId - The room ID.
+   * @param {string} username - The player's username.
+   * @returns {Room} - The updated room instance.
+   */
+  togglePlayerReady(roomId, username) {
+    const room = this.rooms.get(roomId);
+
+    if (!room) {
+      throw new Error('Room not found');
+    }
+
+    const player = room.players.find(p => p.username === username);
+
+    if (!player) {
+      throw new Error('Player not found');
+    }
+
+    if (player === room.players[0]) {
+      return room; // Host cannot toggle ready
+    }
+
+    player.ready = !player.ready;
+    return room;
+  }
+
+  /**
+   * Start the game in a room.
+   * @param {string} roomId - The room ID.
+   * @returns {Room} - The room with the game started.
+   */
+  startGame(roomId) {
+    const room = this.rooms.get(roomId);
+
+    if (!room) {
+      throw new Error('Room not found');
+    }
+
+    if (room.started) {
+      throw new Error('Game already started');
+    }
+
+    const allPlayersReady = room.players.slice(1).every(player => player.ready);
+
+    if (!allPlayersReady) {
+      throw new Error('Not all players are ready');
+    }
+
+    room.started = true;
+    room.gameState = new GameState(room.players);
+    return room;
+  }
+
+  /**
+   * Handle a player's roll action.
+   * @param {string} roomId - The room ID.
+   * @param {number} value - The rolled value.
+   * @returns {Room} - The updated room instance.
+   */
+  handleRoll(roomId, value) {
+    const room = this.rooms.get(roomId);
+
+    if (!room || !room.gameState) {
+      throw new Error('Game not found');
+    }
+
+    const currentPlayer = room.gameState.players[room.gameState.currentPlayer];
+
+    if (currentPlayer.firstMove && value !== 1) {
+      room.gameState.logAction('firstMove', currentPlayer.username, `Must roll a 1 to start`);
+      return room;
+    }
+
+    const cell = currentPlayer.cells[value - 1];
+
+    if (!cell.isActive) {
+      cell.isActive = true;
+      cell.stage = 1;
+      currentPlayer.firstMove = false;
+      room.gameState.logAction('activate', currentPlayer.username, `Activated cell ${value}`);
+    } else if (cell.stage < 6) {
+      cell.stage++;
+      if (cell.stage === 6) {
+        cell.bullets = 5;
+        room.gameState.logAction('maxLevel', currentPlayer.username, `Maxed out cell ${value}`);
+      } else {
+        room.gameState.logAction('upgrade', currentPlayer.username, `Upgraded cell ${value} to stage ${cell.stage}`);
+      }
+    } else {
+      cell.bullets = Math.min((cell.bullets || 0) + 3, 5);
+      room.gameState.logAction('reload', currentPlayer.username, `Reloaded cell ${value}`);
+    }
+
+    room.gameState.lastRoll = value;
+    room.gameState.nextTurn();
+    return room;
+  }
+
+  /**
+   * Handle a player's shoot action.
+   * @param {string} roomId - The room ID.
+   * @param {string} targetPlayer - The target player's username.
+   * @param {number} targetCell - The target cell index.
+   * @returns {Room} - The updated room instance.
+   */
   handleShoot(roomId, targetPlayer, targetCell) {
     const room = this.rooms.get(roomId);
-    if (!room || !room.gameState) throw new Error('Game not found');
-    return this.shootHandler.handle(room, targetPlayer, targetCell);
-  }
 
-  handleTurn(playerId) {
-    const player = this.gameState.getPlayer(playerId);
-    if (!player || player.isEliminated) return;
-
-    const diceRoll = this.rollHandler.handleRoll();
-    player.lastRoll = diceRoll;
-
-    if (player.turnSkips >= 2) {
-      this.freezeRandomCell(player);
-      player.turnSkips = 0; // Reset skips after freezing a cell
-      this.eventEmitter.emit("cellFrozen", { playerId });
-      return;
+    if (!room || !room.gameState) {
+      throw new Error('Game not found');
     }
 
-    if (player.hasSkippedTurn) {
-      player.turnSkips += 1;
-    } else {
-      player.turnSkips = 0; // Reset turn skips if turn is taken
-      this.movePlayer(player, diceRoll);
+    const currentPlayer = room.gameState.players[room.gameState.currentPlayer];
+    const target = room.gameState.players.find(p => p.username === targetPlayer);
+
+    if (!target) {
+      throw new Error('Target player not found');
     }
 
-    this.checkDynamicEvents(player);
-    this.checkPowerUp(player);
-  }
+    const shooterCell = currentPlayer.cells[room.gameState.lastRoll - 1];
 
-  movePlayer(player, steps) {
-    player.position += steps;
-    if (player.position >= this.gameState.goal) {
-      this.gameState.declareWinner(player.id);
+    if (!shooterCell || shooterCell.stage !== 6 || !shooterCell.bullets) {
+      throw new Error('Invalid shot attempt');
     }
-  }
 
-  freezeRandomCell(player) {
-    const unfrozenCells = player.cells.filter(cell => !cell.isFrozen);
-    if (unfrozenCells.length > 0) {
-      const randomCell = unfrozenCells[Math.floor(Math.random() * unfrozenCells.length)];
-      randomCell.isFrozen = true;
+    shooterCell.bullets--;
+
+    const targetCellObj = target.cells[targetCell];
+
+    if (!targetCellObj) {
+      throw new Error('Target cell not found');
     }
-  }
 
-  checkPowerUp(player) {
-    const powerUp = this.powerUpManager.getRandomPowerUp();
-    if (powerUp) {
-      if (player.powerUps.length >= 3) {
-        player.powerUps.shift(); // Remove oldest powerup if inventory is full
-      }
-      player.powerUps.push(powerUp);
-      this.eventEmitter.emit("powerUpGained", { playerId: player.id, powerUp });
+    targetCellObj.isActive = false;
+    targetCellObj.stage = 0;
+    targetCellObj.bullets = 0;
+
+    room.gameState.logAction('shoot', currentPlayer.username, `Shot cell ${targetCell + 1} of ${targetPlayer}`);
+
+    if (target.cells.every(cell => !cell.isActive)) {
+      target.eliminated = true;
+      room.gameState.logAction('eliminate', currentPlayer.username, `Eliminated ${targetPlayer}`);
     }
-  }
 
-  checkDynamicEvents(player) {
-    const randomEventTrigger = Math.random();
-
-    if (randomEventTrigger < 0.05) { // 5% chance for Cell Swap
-      const opponent = this.gameState.getRandomOpponent(player.id);
-      if (opponent) {
-        [player.position, opponent.position] = [opponent.position, player.position];
-        this.eventEmitter.emit("cellSwap", { playerId: player.id, opponentId: opponent.id });
-      }
-    } else if (randomEventTrigger < 0.10) { // Additional 5% for Arena Blackout
-      this.gameState.blackoutTurns = 1;
-      this.eventEmitter.emit("arenaBlackout", {});
-    }
-  }
-
-  eliminatePlayer(playerId) {
-    const player = this.gameState.getPlayer(playerId);
-    if (player) {
-      player.isEliminated = true;
-      this.eventEmitter.emit("playerEliminated", { playerId });
-    }
-  }
-
-  leaderboardUpdate() {
-    const players = this.gameState.getAllPlayers();
-    players.forEach(player => {
-      player.tags = [];
-      if (player.shotsFired > 10) player.tags.push("Top Shooter");
-      if (player.survivalTurns > 20) player.tags.push("Survivor");
-      if (player.comebackScore > 50) player.tags.push("Comeback King");
-    });
-    this.eventEmitter.emit("leaderboardUpdated", { players });
-  }
-
-  endGame() {
-    const tiedPlayers = this.gameState.getTiedPlayers();
-    if (tiedPlayers.length > 1) {
-      this.suddenDeath(tiedPlayers);
-    } else {
-      const winner = this.gameState.getWinner();
-      this.eventEmitter.emit("gameEnded", { winner });
-    }
-  }
-
-  suddenDeath(players) {
-    players.forEach(player => {
-      const diceRoll = this.dice.roll();
-      player.lastRoll = diceRoll;
-    });
-
-    const highestRoll = Math.max(...players.map(player => player.lastRoll));
-    const winners = players.filter(player => player.lastRoll === highestRoll);
-
-    if (winners.length === 1) {
-      this.gameState.declareWinner(winners[0].id);
-      this.eventEmitter.emit("suddenDeathWinner", { playerId: winners[0].id });
-    } else {
-      this.suddenDeath(winners); // Recursively resolve ties in sudden death
-    }
+    room.gameState.nextTurn();
+    return room;
   }
 }
-
-export default GameService;
