@@ -185,31 +185,38 @@ export class GameService {
       throw new Error('Target player not found');
     }
 
+    // Get the shooter's cell based on the last roll
     const shooterCell = currentPlayer.cells[room.gameState.lastRoll - 1];
 
+    // Check if the shooter's cell has bullets
     if (!shooterCell || shooterCell.stage !== 6 || !shooterCell.bullets) {
-      throw new Error('Invalid shot attempt');
+      throw new Error('No bullets available');
     }
 
+    // Get the target cell
+    const targetCellObj = target.cells[targetCell];
+    if (!targetCellObj || !targetCellObj.isActive) {
+      throw new Error('Invalid target cell - cell must be active');
+    }
+
+    // Deduct a bullet from the shooter's cell
     shooterCell.bullets--;
 
-    const targetCellObj = target.cells[targetCell];
-
-    if (!targetCellObj) {
-      throw new Error('Target cell not found');
-    }
-
+    // Reset the target cell to stage 0
     targetCellObj.isActive = false;
     targetCellObj.stage = 0;
     targetCellObj.bullets = 0;
 
+    // Log the shooting action
     room.gameState.logAction('shoot', currentPlayer.username, `Shot cell ${targetCell + 1} of ${targetPlayer}`);
 
+    // Check if the target player is eliminated
     if (target.cells.every(cell => !cell.isActive)) {
       target.eliminated = true;
       room.gameState.logAction('eliminate', currentPlayer.username, `Eliminated ${targetPlayer}`);
     }
 
+    // Move to next turn
     room.gameState.nextTurn();
     return room;
   }
